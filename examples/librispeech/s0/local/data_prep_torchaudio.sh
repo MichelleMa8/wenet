@@ -13,12 +13,6 @@ fi
 src=$1
 dst=$2
 
-# all utterances are FLAC compressed
-if ! which flac >&/dev/null; then
-   echo "Please install 'flac' on ALL worker nodes!"
-   exit 1
-fi
-
 mkdir -p $dst || exit 1
 
 [ ! -d $src ] && echo "$0: no such directory $src" && exit 1
