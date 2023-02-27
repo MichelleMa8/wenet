@@ -299,6 +299,8 @@ def main():
             writer.add_scalar('epoch/cv_loss', cv_loss, epoch)
             writer.add_scalar('epoch/lr', lr, epoch)
         final_epoch = epoch
+    
+    logging.info(f'Peak CUDA mem: {torch.cuda.max_memory_allocated()/1024**3:.2f} GB')
 
     if final_epoch is not None and args.rank == 0:
         final_model_path = os.path.join(model_dir, 'final.pt')
