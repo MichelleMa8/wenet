@@ -76,7 +76,6 @@ class Executor:
                     # The more details about amp can be found in
                     # https://pytorch.org/docs/stable/notes/amp_examples.html
                     if gemini_state:
-                        # with torch.cuda.amp.autocast(scaler is not None):
                         loss_dict = model(feats, feats_lengths, target,
                                             target_lengths)
                         loss = loss_dict['loss'] / accum_grad
