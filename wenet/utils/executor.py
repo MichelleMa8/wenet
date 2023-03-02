@@ -27,7 +27,7 @@ class Executor:
         self.step = 0
 
     def train(self, model, optimizer, scheduler, data_loader, device, writer,
-              args, scaler):
+              args, scaler, gemini_state):
         ''' Train one epoch
         '''
         model.train()
@@ -40,6 +40,7 @@ class Executor:
         use_amp = args.get('use_amp', False)
         logging.info('using accumulate grad, new batch size is {} times'
                      ' larger than before'.format(accum_grad))
+
         if use_amp:
             assert scaler is not None
         # A context manager to be used in conjunction with an instance of
@@ -74,19 +75,28 @@ class Executor:
                     # autocast context
                     # The more details about amp can be found in
                     # https://pytorch.org/docs/stable/notes/amp_examples.html
-                    with torch.cuda.amp.autocast(scaler is not None):
+                    if gemini_state:
+                        # with torch.cuda.amp.autocast(scaler is not None):
                         loss_dict = model(feats, feats_lengths, target,
-                                          target_lengths)
+                                            target_lengths)
                         loss = loss_dict['loss'] / accum_grad
+                    else:
+                        with torch.cuda.amp.autocast(scaler is not None):
+                            loss_dict = model(feats, feats_lengths, target,
+                                                target_lengths)
+                            loss = loss_dict['loss'] / accum_grad
                     if use_amp:
                         scaler.scale(loss).backward()
                     else:
-                        loss.backward()
+                        if gemini_state:
+                            optimizer.backward(loss)
+                        else:
+                            loss.backward()
 
                 num_seen_utts += num_utts
                 if batch_idx % accum_grad == 0:
                     if rank == 0 and writer is not None:
-                        writer.add_scalar('train_loss', loss, self.step)
+                        writer.add_scalar('train_loss', loss.item(), self.step)
                     # Use mixed precision training
                     if use_amp:
                         scaler.unscale_(optimizer)
@@ -101,8 +111,11 @@ class Executor:
                         scaler.step(optimizer)
                         scaler.update()
                     else:
-                        grad_norm = clip_grad_norm_(model.parameters(), clip)
-                        if torch.isfinite(grad_norm):
+                        if not gemini_state:
+                            grad_norm = clip_grad_norm_(model.parameters(), clip)
+                            if torch.isfinite(grad_norm):
+                                optimizer.step()
+                        else:
                             optimizer.step()
                     optimizer.zero_grad()
                     scheduler.step()

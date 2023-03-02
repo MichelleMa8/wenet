@@ -24,6 +24,7 @@ from wenet.transformer.decoder import BiTransformerDecoder, TransformerDecoder
 from wenet.transformer.encoder import ConformerEncoder, TransformerEncoder
 from wenet.squeezeformer.encoder import SqueezeformerEncoder
 from wenet.efficient_conformer.encoder import EfficientConformerEncoder
+from wenet.transformer.swish import Swish
 from wenet.utils.cmvn import load_cmvn
 
 

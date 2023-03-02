@@ -40,7 +40,9 @@ class GlobalCMVN(torch.nn.Module):
         Returns:
             (torch.Tensor): normalized feature
         """
-        x = x - self.mean
+        mean = self.mean.to('cuda')
+        istd = self.istd.to('cuda')
+        x = x - mean
         if self.norm_var:
-            x = x * self.istd
+            x = x * istd
         return x

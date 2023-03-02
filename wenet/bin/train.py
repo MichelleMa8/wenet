@@ -37,6 +37,103 @@ from wenet.utils.scheduler import WarmupLR, NoamHoldAnnealing
 from wenet.utils.config import override_config
 from wenet.utils.init_model import init_model
 
+import colossalai
+from colossalai.nn.parallel import GeminiDDP
+from colossalai.utils import get_current_device
+from colossalai.utils.model.colo_init_context import ColoInitContext
+from colossalai.nn.optimizer.gemini_optimizer import GeminiAdamOptimizer
+from colossalai.nn.optimizer import HybridAdam
+from colossalai.nn.parallel import zero_model_wrapper, zero_optim_wrapper
+
+def get_args_colo():
+    # parser = argparse.ArgumentParser(description='training your network')
+    parser = colossalai.get_default_parser()
+    #config is contained in colossalai.get_default_parser
+    # parser.add_argument('--config', required=True, help='config file')
+    parser.add_argument('--data_type',
+                        default='raw',
+                        choices=['raw', 'shard'],
+                        help='train and cv data type')
+    parser.add_argument('--train_data', required=True, help='train data file')
+    parser.add_argument('--cv_data', required=True, help='cv data file')
+    parser.add_argument('--gpu',
+                        type=int,
+                        default=-1,
+                        help='gpu id for this local rank, -1 for cpu')
+    parser.add_argument('--model_dir', required=True, help='save model dir')
+    parser.add_argument('--checkpoint', help='checkpoint model')
+    parser.add_argument('--tensorboard_dir',
+                        default='tensorboard',
+                        help='tensorboard log dir')
+    parser.add_argument('--ddp.rank',
+                        dest='rank',
+                        default=0,
+                        type=int,
+                        help='global rank for distributed training')
+    parser.add_argument('--ddp.world_size',
+                        dest='world_size',
+                        default=-1,
+                        type=int,
+                        help='''number of total processes/gpus for
+                        distributed training''')
+    parser.add_argument('--ddp.dist_backend',
+                        dest='dist_backend',
+                        default='nccl',
+                        choices=['nccl', 'gloo'],
+                        help='distributed backend')
+    parser.add_argument('--ddp.init_method',
+                        dest='init_method',
+                        default=None,
+                        help='ddp init method')
+    parser.add_argument('--num_workers',
+                        default=0,
+                        type=int,
+                        help='num of subprocess workers for reading')
+    parser.add_argument('--pin_memory',
+                        action='store_true',
+                        default=False,
+                        help='Use pinned memory buffers used for reading')
+    parser.add_argument('--use_amp',
+                        action='store_true',
+                        default=False,
+                        help='Use automatic mixed precision training')
+    parser.add_argument('--fp16_grad_sync',
+                        action='store_true',
+                        default=False,
+                        help='Use fp16 gradient sync for ddp')
+    parser.add_argument('--cmvn', default=None, help='global cmvn file')
+    parser.add_argument('--symbol_table',
+                        required=True,
+                        help='model unit symbol table for training')
+    parser.add_argument("--non_lang_syms",
+                        help="non-linguistic symbol file. One symbol per line.")
+    parser.add_argument('--prefetch',
+                        default=100,
+                        type=int,
+                        help='prefetch number')
+    parser.add_argument('--bpe_model',
+                        default=None,
+                        type=str,
+                        help='bpe model for english part')
+    parser.add_argument('--override_config',
+                        action='append',
+                        default=[],
+                        help="override yaml config")
+    parser.add_argument("--enc_init",
+                        default=None,
+                        type=str,
+                        help="Pre-trained model to initialize encoder")
+    parser.add_argument("--enc_init_mods",
+                        default="encoder.",
+                        type=lambda s: [str(mod) for mod in s.split(",") if s != ""],
+                        help="List of encoder modules \
+                        to initialize ,separated by a comma")
+    parser.add_argument('--gemini', required=True, help='whether to use Gemini Optimizer')
+
+
+    args = parser.parse_args()
+    return args
+
 def get_args():
     parser = argparse.ArgumentParser(description='training your network')
     parser.add_argument('--config', required=True, help='config file')
@@ -118,14 +215,28 @@ def get_args():
                         type=lambda s: [str(mod) for mod in s.split(",") if s != ""],
                         help="List of encoder modules \
                         to initialize ,separated by a comma")
+    parser.add_argument('--gemini', required=True, help='whether to use Gemini Optimizer')
+    parser.add_argument('--rank', required=False, help='not needed')
+    parser.add_argument('--world_size', required=False, help='not needed')
+    parser.add_argument('--port', required=False, help='not needed')
+    parser.add_argument('--host', required=False, help='not needed')
 
 
     args = parser.parse_args()
     return args
 
-
 def main():
     args = get_args()
+
+    # whether to use colossalai's gemini optimizer
+    if args.gemini in ['true', 'True', 't', 'T', '1']:
+        gemini_state = True
+        args = get_args_colo()
+    else:
+        gemini_state = False
+
+    print(args)
+
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(message)s')
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -137,13 +248,22 @@ def main():
     if len(args.override_config) > 0:
         configs = override_config(configs, args.override_config)
 
-    distributed = args.world_size > 1
+    distributed = int(args.world_size) > 1
     if distributed:
-        logging.info('training on multiple gpus, this gpu {}'.format(args.gpu))
-        dist.init_process_group(args.dist_backend,
-                                init_method=args.init_method,
-                                world_size=args.world_size,
-                                rank=args.rank)
+        if gemini_state:
+            colossalai.launch(config={},
+                rank=args.rank,
+                world_size=args.world_size,
+                host=args.host,
+                port=args.port,
+                backend=args.backend
+            )
+        else:
+            logging.info('training on multiple gpus, this gpu {}'.format(args.gpu))
+            dist.init_process_group(args.dist_backend,
+                                    init_method=args.init_method,
+                                    world_size=args.world_size,
+                                    rank=args.rank)
 
     symbol_table = read_symbol_table(args.symbol_table)
 
@@ -194,11 +314,21 @@ def main():
             data = yaml.dump(configs)
             fout.write(data)
 
-    # Init asr model from configs
-    model = init_model(configs)
-    print(model)
-    num_params = sum(p.numel() for p in model.parameters())
-    print('the number of model params: {:,d}'.format(num_params))
+    # initialize model
+    if gemini_state:
+        with ColoInitContext() as ctx:
+            # Init asr model from configs
+            model = init_model(configs)
+            # print(model)
+        logging.info(f'Successfully initial model with ColossalAI.')
+    else:
+        # Init asr model from configs
+        model = init_model(configs)
+        # print(model)
+        logging.info(f'Without ColossalAI.')
+    
+        num_params = sum(p.numel() for p in model.parameters())
+        print('the number of model params: {:,d}'.format(num_params))
 
     # !!!IMPORTANT!!!
     # Try to export the model by script, if fails, we should refine
@@ -229,29 +359,57 @@ def main():
 
     if distributed:
         assert (torch.cuda.is_available())
-        # cuda model is required for nn.parallel.DistributedDataParallel
-        model.cuda()
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, find_unused_parameters=True)
-        device = torch.device("cuda")
-        if args.fp16_grad_sync:
-            from torch.distributed.algorithms.ddp_comm_hooks import (
-                default as comm_hooks,
-            )
-            model.register_comm_hook(
-                state=None, hook=comm_hooks.fp16_compress_hook
-            )
+        # use colossalai's gemini
+        if gemini_state:
+            assert (torch.cuda.is_available())
+            device = torch.device('cuda')
+
+            gemini_config = dict(strict_ddp_mode=True,
+                                 device=get_current_device(),
+                                 placement_policy='cpu',
+                                 pin_memory=True,
+                                 hidden_dim=configs['encoder_conf']['linear_units'],
+                                 search_range_mb=128)
+            #optim_config = dict(gpu_margin_mem_ratio=0.)
+
+            # build a highly optimized gpu/cpu optimizer
+            optimizer = HybridAdam(model.parameters(), lr=1e-3)
+
+            zero_stage = 2
+            # wrap your model and optimizer
+            model = zero_model_wrapper(model, zero_stage, gemini_config)
+            
+            optimizer = zero_optim_wrapper(model, optimizer)
+            print('success with colossalai!')
+
+        else:
+            # use torch's data parallel
+            print('not success with colossalai!')
+            # cuda model is required for nn.parallel.DistributedDataParallel
+            model.cuda()
+            model = torch.nn.parallel.DistributedDataParallel(
+                model, find_unused_parameters=True)
+            device = torch.device("cuda")
+            if args.fp16_grad_sync:
+                from torch.distributed.algorithms.ddp_comm_hooks import (
+                    default as comm_hooks,
+                )
+                model.register_comm_hook(
+                    state=None, hook=comm_hooks.fp16_compress_hook
+                )
     else:
         use_cuda = args.gpu >= 0 and torch.cuda.is_available()
         device = torch.device('cuda' if use_cuda else 'cpu')
-        model = model.to(device)
+        model = model.to(device)   
 
-    if configs['optim'] == 'adam':
-        optimizer = optim.Adam(model.parameters(), **configs['optim_conf'])
-    elif configs['optim'] == 'adamw':
-        optimizer = optim.AdamW(model.parameters(), **configs['optim_conf'])
-    else:
-        raise ValueError("unknown optimizer: " + configs['optim'])
+    if not gemini_state:
+        if configs['optim'] == 'adam':
+            optimizer = optim.Adam(model.parameters(), **configs['optim_conf'])
+        elif configs['optim'] == 'adamw':
+            optimizer = optim.AdamW(model.parameters(), **configs['optim_conf'])
+        else:
+            raise ValueError("unknown optimizer: " + configs['optim'])
+
     if configs['scheduler'] == 'warmuplr':
         scheduler = WarmupLR(optimizer, **configs['scheduler_conf'])
     elif configs['scheduler'] == 'NoamHoldAnnealing':
@@ -281,7 +439,7 @@ def main():
         lr = optimizer.param_groups[0]['lr']
         logging.info('Epoch {} TRAIN info lr {}'.format(epoch, lr))
         executor.train(model, optimizer, scheduler, train_data_loader, device,
-                       writer, configs, scaler)
+                       writer, configs, scaler, gemini_state)
         total_loss, num_seen_utts = executor.cv(model, cv_data_loader, device,
                                                 configs)
         cv_loss = total_loss / num_seen_utts
