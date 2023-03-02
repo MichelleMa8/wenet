@@ -6,7 +6,7 @@
 export CUDA_VISIBLE_DEVICES="6,7"
 
 # Whether to use Gemini Optimizer, 'true' or 'false'
-gemini_state=true
+gemini_state=false
 # wav data dir
 wave_data=data
 data_url=www.openslr.org/resources/12
@@ -111,55 +111,57 @@ $cmvn && cmvn_opts="--cmvn $wave_data/${train_set}/global_cmvn"
 # and output dimension, train.yaml will be used for inference or model
 # export later
 if [[ $gemini_state == t* ]] || [[ $gemini_state == T* ]] || [ $gemini_state == 1 ]; then
-echo "USING COLOSSALAI"
-for ((i = 0; i < $num_gpus; ++i)); do
-{
-gpu_id=$(echo $CUDA_VISIBLE_DEVICES | cut -d',' -f$[$i+1])
-python wenet/bin/train.py --gpu $gpu_id \
-    --config $train_config \
-    --data_type raw \
-    --symbol_table $dict \
-    --train_data $wave_data/$train_set/data.list \
-    --cv_data $wave_data/dev/data.list \
-    ${checkpoint:+--checkpoint $checkpoint} \
-    --model_dir $dir \
-    --ddp.init_method $init_method \
-    --ddp.world_size $num_gpus \
-    --ddp.rank $i \
-    --ddp.dist_backend $dist_backend \
-    --num_workers 1 \
-    $cmvn_opts \
-    --pin_memory \
-    --rank $i \
-    --world_size $num_gpus \
-    --port 28600 \
-    --host localhost \
-    --gemini $gemini_state
-} &
-done
-wait
+    echo "USING COLOSSALAI"
+    for ((i = 0; i < $num_gpus; ++i)); do
+    {
+    gpu_id=$(echo $CUDA_VISIBLE_DEVICES | cut -d',' -f$[$i+1])
+    python wenet/bin/train.py --gpu $gpu_id \
+        --config $train_config \
+        --data_type raw \
+        --symbol_table $dict \
+        --train_data $wave_data/$train_set/data.list \
+        --cv_data $wave_data/dev/data.list \
+        ${checkpoint:+--checkpoint $checkpoint} \
+        --model_dir $dir \
+        --ddp.init_method $init_method \
+        --ddp.world_size $num_gpus \
+        --ddp.rank $i \
+        --ddp.dist_backend $dist_backend \
+        --num_workers 1 \
+        $cmvn_opts \
+        --pin_memory \
+        --rank $i \
+        --world_size $num_gpus \
+        --port 28600 \
+        --host localhost \
+        --gemini $gemini_state
+    } &
+    done
+    wait
 else
-echo "NOT USING COLOSSALAI"
-for ((i = 0; i < $num_gpus; ++i)); do
-{
-gpu_id=$(echo $CUDA_VISIBLE_DEVICES | cut -d',' -f$[$i+1])
-python wenet/bin/train.py --gpu $gpu_id \
-    --config $train_config \
-    --data_type raw \
-    --symbol_table $dict \
-    --train_data $wave_data/$train_set/data.list \
-    --cv_data $wave_data/dev/data.list \
-    ${checkpoint:+--checkpoint $checkpoint} \
-    --model_dir $dir \
-    --ddp.init_method $init_method \
-    --ddp.world_size $num_gpus \
-    --ddp.rank $i \
-    --ddp.dist_backend $dist_backend \
-    --num_workers 1 \
-    $cmvn_opts \
-    --pin_memory \
-    --gemini $gemini_state
-} &
-done
-wait
+    echo "NOT USING COLOSSALAI"
+    for ((i = 0; i < $num_gpus; ++i)); do
+    {
+    gpu_id=$(echo $CUDA_VISIBLE_DEVICES | cut -d',' -f$[$i+1])
+    python wenet/bin/train.py --gpu $gpu_id \
+        --config $train_config \
+        --data_type raw \
+        --symbol_table $dict \
+        --train_data $wave_data/$train_set/data.list \
+        --cv_data $wave_data/dev/data.list \
+        ${checkpoint:+--checkpoint $checkpoint} \
+        --model_dir $dir \
+        --ddp.init_method $init_method \
+        --ddp.world_size $num_gpus \
+        --ddp.rank $i \
+        --ddp.dist_backend $dist_backend \
+        --num_workers 1 \
+        $cmvn_opts \
+        --pin_memory \
+        --gemini $gemini_state \
+        --rank $i \
+        --world_size $num_gpus
+    } &
+    done
+    wait
 fi

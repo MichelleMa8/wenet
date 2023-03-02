@@ -216,8 +216,8 @@ def get_args():
                         help="List of encoder modules \
                         to initialize ,separated by a comma")
     parser.add_argument('--gemini', required=True, help='whether to use Gemini Optimizer')
-    parser.add_argument('--rank', required=False, help='not needed')
-    parser.add_argument('--world_size', required=False, help='not needed')
+    parser.add_argument('--rank', type=int, required=False, help='not needed')
+    parser.add_argument('--world_size', type=int, required=False, help='not needed')
     parser.add_argument('--port', required=False, help='not needed')
     parser.add_argument('--host', required=False, help='not needed')
 
@@ -264,6 +264,7 @@ def main():
                                     init_method=args.init_method,
                                     world_size=args.world_size,
                                     rank=args.rank)
+            torch.cuda.set_device(f'cuda:{args.rank}')
 
     symbol_table = read_symbol_table(args.symbol_table)
 
