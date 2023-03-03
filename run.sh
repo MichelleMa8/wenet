@@ -15,6 +15,7 @@ data_dir=/data/scratch/librspeech/
 # Optional train_config
 # 1. conf/train_transformer_large.yaml: Standard transformer
 train_config=examples/librispeech/s0/conf/train_u2++_conformer.yaml
+# train_config=examples/librispeech/rnnt/conf/conformer_rnnt.yaml
 checkpoint=
 cmvn=true
 do_delta=false

@@ -232,8 +232,10 @@ def main():
     if args.gemini in ['true', 'True', 't', 'T', '1']:
         gemini_state = True
         args = get_args_colo()
+        #torch.cuda.set_per_process_memory_fraction(0.5, args.rank)
     else:
         gemini_state = False
+        #torch.cuda.set_per_process_memory_fraction(0.5, args.rank)
 
     print(args)
 
@@ -363,11 +365,11 @@ def main():
         # use colossalai's gemini
         if gemini_state:
             assert (torch.cuda.is_available())
-            device = torch.device('cuda')
+            device = torch.device(f'cuda:{args.rank}')
 
             gemini_config = dict(strict_ddp_mode=True,
-                                 device=get_current_device(),
-                                 placement_policy='cpu',
+                                 device=f'cuda:{args.rank}',
+                                 placement_policy='cuda',
                                  pin_memory=True,
                                  hidden_dim=configs['encoder_conf']['linear_units'],
                                  search_range_mb=128)
@@ -390,7 +392,8 @@ def main():
             model.cuda()
             model = torch.nn.parallel.DistributedDataParallel(
                 model, find_unused_parameters=True)
-            device = torch.device("cuda")
+            device = torch.device('cuda')
+            #device = torch.device(f'cuda:{args.rank}')
             if args.fp16_grad_sync:
                 from torch.distributed.algorithms.ddp_comm_hooks import (
                     default as comm_hooks,
@@ -441,22 +444,22 @@ def main():
         logging.info('Epoch {} TRAIN info lr {}'.format(epoch, lr))
         executor.train(model, optimizer, scheduler, train_data_loader, device,
                        writer, configs, scaler, gemini_state)
-        total_loss, num_seen_utts = executor.cv(model, cv_data_loader, device,
-                                                configs)
-        cv_loss = total_loss / num_seen_utts
+        # total_loss, num_seen_utts = executor.cv(model, cv_data_loader, device,
+        #                                         configs)
+        # cv_loss = total_loss / num_seen_utts
 
-        logging.info('Epoch {} CV info cv_loss {}'.format(epoch, cv_loss))
+        # logging.info('Epoch {} CV info cv_loss {}'.format(epoch, cv_loss))
         if args.rank == 0:
             save_model_path = os.path.join(model_dir, '{}.pt'.format(epoch))
             save_checkpoint(
                 model, save_model_path, {
                     'epoch': epoch,
                     'lr': lr,
-                    'cv_loss': cv_loss,
+                    # 'cv_loss': cv_loss,
                     'step': executor.step
                 })
-            writer.add_scalar('epoch/cv_loss', cv_loss, epoch)
-            writer.add_scalar('epoch/lr', lr, epoch)
+            # writer.add_scalar('epoch/cv_loss', cv_loss, epoch)
+            # writer.add_scalar('epoch/lr', lr, epoch)
         final_epoch = epoch
     
     logging.info(f'Peak CUDA mem: {torch.cuda.max_memory_allocated()/1024**3:.2f} GB')

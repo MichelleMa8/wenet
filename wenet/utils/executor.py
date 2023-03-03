@@ -127,7 +127,8 @@ class Executor:
                     for name, value in loss_dict.items():
                         if name != 'loss' and value is not None:
                             log_str += '{} {:.6f} '.format(name, value.item())
-                    log_str += 'lr {:.8f} rank {}'.format(lr, rank)
+                    log_str += 'lr {:.8f} rank {} '.format(lr, rank)
+                    log_str += '{:.2f} GB'.format(torch.cuda.max_memory_allocated()/1024**3)
                     logging.debug(log_str)
 
     def cv(self, model, data_loader, device, args):
