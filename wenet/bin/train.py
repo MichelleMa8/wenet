@@ -368,7 +368,7 @@ def main():
             device = torch.device(f'cuda:{args.rank}')
 
             gemini_config = dict(strict_ddp_mode=True,
-                                 device=f'cuda:{args.rank}',
+                                 device=device,
                                  placement_policy='cuda',
                                  pin_memory=True,
                                  hidden_dim=configs['encoder_conf']['linear_units'],
@@ -380,8 +380,8 @@ def main():
 
             zero_stage = 2
             # wrap your model and optimizer
-            model = zero_model_wrapper(model, zero_stage, gemini_config)
-            
+            model = zero_model_wrapper(model, zero_stage, gemini_config).to(device)
+
             optimizer = zero_optim_wrapper(model, optimizer)
             print('success with colossalai!')
 
@@ -401,6 +401,7 @@ def main():
                 model.register_comm_hook(
                     state=None, hook=comm_hooks.fp16_compress_hook
                 )
+            print(f'the current device is {next(model.parameters()).device}')
     else:
         use_cuda = args.gpu >= 0 and torch.cuda.is_available()
         device = torch.device('cuda' if use_cuda else 'cpu')

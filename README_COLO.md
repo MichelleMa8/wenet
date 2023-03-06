@@ -31,8 +31,10 @@ CUDA_EXT=1 pip install .
 
 ## Training
 
-The script `run.sh` is provided to train the model with and without ColossalAI's ZeRO optimizer.
+The script `./run.sh` is provided to train the model with or without ColossalAI's ZeRO optimizer.
 
-- You can change `gemini_state=true` or `gemini_state=false` (line 9) to deside whether using ColossalAI
+- You can set `CUDA_VISIBLE_DEVICES` (line 6) to your available cuda devices
 - You can change `data_dir` (line 13) to your own data directory
+- You can change `gemini_state=true` or `gemini_state=false` (line 9) to decide whether using ColossalAI
+- You can change `train_config` (line 17) to the model's configuration file.
 
