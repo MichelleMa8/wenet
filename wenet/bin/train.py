@@ -28,6 +28,8 @@ import yaml
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
+#from torch.profiler import profile, record_function, ProfilerActivity
+
 from wenet.dataset.dataset import Dataset
 from wenet.utils.checkpoint import (load_checkpoint, save_checkpoint,
                                     load_trained_modules)
@@ -232,12 +234,13 @@ def main():
     if args.gemini in ['true', 'True', 't', 'T', '1']:
         gemini_state = True
         args = get_args_colo()
-        #torch.cuda.set_per_process_memory_fraction(0.5, args.rank)
     else:
         gemini_state = False
         #torch.cuda.set_per_process_memory_fraction(0.5, args.rank)
 
     print(args)
+
+    #torch.cuda.set_per_process_memory_fraction(0.4, args.rank)
 
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(message)s')
@@ -258,7 +261,7 @@ def main():
                 world_size=args.world_size,
                 host=args.host,
                 port=args.port,
-                backend=args.backend
+                backend=args.dist_backend
             )
         else:
             logging.info('training on multiple gpus, this gpu {}'.format(args.gpu))
@@ -330,8 +333,9 @@ def main():
         # print(model)
         logging.info(f'Without ColossalAI.')
     
-        num_params = sum(p.numel() for p in model.parameters())
-        print('the number of model params: {:,d}'.format(num_params))
+    num_params = sum(p.numel() for p in model.parameters())
+    print('the number of model params: {:,d}'.format(num_params))
+
 
     # !!!IMPORTANT!!!
     # Try to export the model by script, if fails, we should refine
@@ -382,7 +386,11 @@ def main():
             # wrap your model and optimizer
             model = zero_model_wrapper(model, zero_stage, gemini_config).to(device)
 
-            optimizer = zero_optim_wrapper(model, optimizer)
+            optim_config = {
+                "reduce_bucket_size": 12 * 1024 * 1024,
+                "overlap_communication": True
+            }
+            optimizer = zero_optim_wrapper(model, optimizer, optim_config=optim_config)
             print('success with colossalai!')
 
         else:
@@ -401,7 +409,6 @@ def main():
                 model.register_comm_hook(
                     state=None, hook=comm_hooks.fp16_compress_hook
                 )
-            print(f'the current device is {next(model.parameters()).device}')
     else:
         use_cuda = args.gpu >= 0 and torch.cuda.is_available()
         device = torch.device('cuda' if use_cuda else 'cpu')
@@ -422,6 +429,10 @@ def main():
     else:
         raise ValueError("unknown scheduler: " + configs['scheduler'])
 
+    # print('Optimizer state_dict:')
+    # for var_name in optimizer.state_dict():
+    #     print(var_name, '\t', optimizer.state_dict()[var_name])
+    
     final_epoch = None
     configs['rank'] = args.rank
     configs['is_distributed'] = distributed
@@ -438,13 +449,16 @@ def main():
     if args.use_amp:
         scaler = torch.cuda.amp.GradScaler()
 
+    # with profile(activities=[ProfilerActivity.CUDA], with_flops=True, record_shapes=True) as prof:
+    #     with record_function("model_training"):
     for epoch in range(start_epoch, num_epochs):
         train_dataset.set_epoch(epoch)
         configs['epoch'] = epoch
         lr = optimizer.param_groups[0]['lr']
         logging.info('Epoch {} TRAIN info lr {}'.format(epoch, lr))
+        
         executor.train(model, optimizer, scheduler, train_data_loader, device,
-                       writer, configs, scaler, gemini_state)
+                            writer, configs, scaler, gemini_state)
         # total_loss, num_seen_utts = executor.cv(model, cv_data_loader, device,
         #                                         configs)
         # cv_loss = total_loss / num_seen_utts
@@ -461,9 +475,12 @@ def main():
                 })
             # writer.add_scalar('epoch/cv_loss', cv_loss, epoch)
             # writer.add_scalar('epoch/lr', lr, epoch)
-        final_epoch = epoch
+
+    #print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=20))
     
     logging.info(f'Peak CUDA mem: {torch.cuda.max_memory_allocated()/1024**3:.2f} GB')
+
+    final_epoch = epoch
 
     if final_epoch is not None and args.rank == 0:
         final_model_path = os.path.join(model_dir, 'final.pt')
