@@ -104,7 +104,7 @@ init_method=file://$(readlink -f $INIT_FILE)
 echo "$0: init method is $init_method"
 num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
 # Use "nccl" if it works, otherwise use "gloo"
-dist_backend="gloo"
+dist_backend="nccl"
 cmvn_opts=
 $cmvn && cmvn_opts="--cmvn $wave_data/${train_set}/global_cmvn"
 
